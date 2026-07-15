@@ -1,0 +1,44 @@
+[
+  {
+    "ip": "192.168.0.1",
+    "hostname": "Unknown",
+    "mac": "Unknown",
+    "vendor": "Unknown Vendor",
+    "deviceType": "Router / Gateway",
+    "latency": "0.413 ms",
+    "openPorts": [
+      {
+        "port": 80,
+        "open": true,
+        "service": "http"
+      }
+    ],
+    "scannedAt": "2026-07-15T20:52:58.077Z"
+  },
+  {
+    "ip": "192.168.0.103",
+    "hostname": "Unknown",
+    "mac": "Unknown",
+    "vendor": "Unknown Vendor",
+    "deviceType": "Linux / Unix Server",
+    "latency": "0.03 ms",
+    "openPorts": [
+      {
+        "port": 22,
+        "open": true,
+        "service": "ssh"
+      }
+    ],
+    "scannedAt": "2026-07-15T20:53:01.060Z"
+  },
+  {
+    "ip": "192.168.0.100",
+    "hostname": "Unknown",
+    "mac": "Unknown",
+    "vendor": "Unknown Vendor",
+    "deviceType": "Unknown Device",
+    "latency": "157 ms",
+    "openPorts": [],
+    "scannedAt": "2026-07-15T20:53:01.219Z"
+  }
+]

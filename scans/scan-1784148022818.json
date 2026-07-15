@@ -1,0 +1,35 @@
+[
+    {
+        "ip": "192.168.0.1",
+        "hostname": "Unknown",
+        "latency": "0.359 ms",
+        "openPorts": [
+            {
+                "port": 80,
+                "open": true,
+                "service": "HTTP"
+            }
+        ],
+        "scannedAt": "2026-07-15T20:40:21.849Z"
+    },
+    {
+        "ip": "192.168.0.103",
+        "hostname": "Unknown",
+        "latency": "0.036 ms",
+        "openPorts": [
+            {
+                "port": 22,
+                "open": true,
+                "service": "SSH"
+            }
+        ],
+        "scannedAt": "2026-07-15T20:40:21.894Z"
+    },
+    {
+        "ip": "192.168.0.100",
+        "hostname": "Unknown",
+        "latency": "80.4 ms",
+        "openPorts": [],
+        "scannedAt": "2026-07-15T20:40:22.059Z"
+    }
+]
