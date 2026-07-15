@@ -1,4 +1,0 @@
-ip,hostname,mac,vendor,deviceType,latency,openPorts,scannedAt
-192.168.0.1,Unknown,Unknown,Unknown Vendor,Router / Gateway,0.365 ms,80(http),2026-07-15T20:52:41.092Z
-192.168.0.103,Unknown,Unknown,Unknown Vendor,Linux / Unix Server,0.024 ms,22(ssh),2026-07-15T20:52:44.074Z
-192.168.0.100,Unknown,Unknown,Unknown Vendor,Unknown Device,47.7 ms,,2026-07-15T20:52:44.100Z
