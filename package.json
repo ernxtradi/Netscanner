@@ -16,7 +16,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start":"nodemon src/index.js",
+    "start": "nodemon src/index.js",
+    "monitor": "node src/index.js --monitor",
+    "web": "node web/server.js",
+    "dev:web": "nodemon web/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

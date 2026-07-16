@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Netscanner Dashboard</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Netscanner</h1>
+    <div class="subnet-info" id="subnet-info">Detecting subnet…</div>
+    <div class="controls">
+      <button id="scan-btn">Start Scan</button>
+      <label class="monitor-toggle">
+        <input type="checkbox" id="monitor-toggle">
+        Monitor
+        <input type="number" id="monitor-interval" value="60" min="5" step="5" title="interval (seconds)">
+        s
+      </label>
+      <span class="status-pill" id="status-pill">idle</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel table-panel">
+      <h2>Hosts <span id="host-count"></span></h2>
+      <div class="table-scroll">
+        <table id="host-table">
+          <thead>
+            <tr>
+              <th>IP</th><th>Hostname</th><th>MAC</th><th>Vendor</th>
+              <th>Type</th><th>Latency</th><th>Ports</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="report-links" id="report-links"></div>
+    </section>
+
+    <section class="panel graph-panel">
+      <h2>Topology</h2>
+      <div id="topology"></div>
+    </section>
+
+    <section class="panel log-panel">
+      <h2>Change Log</h2>
+      <ul id="change-log"></ul>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/vendor/vis-network/vis-network.js"></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>

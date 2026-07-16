@@ -4,8 +4,8 @@ const { getHostname } = require("./dns");
 const { scanPorts } = require("./ports");
 const { getMac } = require("./arp");
 const { getVendor } = require("./vendor");
+const { getGatewayIp } = require("./gateway");
 const { classifyDevice } = require("./classify");
-const report = require("./report");
 const { runWithConcurrency } = require("./utils");
 
 // How many hosts to probe (ping + DNS + ARP + port scan) at the same time.
@@ -14,128 +14,80 @@ const { runWithConcurrency } = require("./utils");
 // available sockets/file descriptors. This caps it to a sane pool size.
 const HOST_CONCURRENCY = 30;
 
-const onlineHosts = [];
-let scanned = 0;
-let totalHosts = 0;
-
 /**
- * Scan a single host: liveness, hostname, MAC/vendor, open ports, classification.
- * @param {string} ip
- * @param {string|null} gatewayIp - The subnet's gateway IP, if known, so it
- *   can be flagged for classification.
+ * Scan the local subnet: liveness, hostname, MAC/vendor, open ports,
+ * classification, for every host in range.
+ *
+ * Stateless and reentrant — all mutable state lives in local variables,
+ * so this is safe to call repeatedly or concurrently (e.g. from a web
+ * dashboard handling on-demand scans while a monitor loop is also
+ * ticking). Has no side effects of its own (no console output, no
+ * report files) — callers own presentation and persistence.
+ *
+ * @param {object} [options]
+ * @param {number} [options.hostConcurrency=30] - Max hosts probed at once.
+ * @param {string[]} [options.ips] - Explicit IP list to scan; defaults to
+ *   the detected subnet's usable host range.
+ * @param {(ip: string, scanned: number, total: number) => void} [options.onProgress]
+ *   - Called before each host is probed.
+ * @param {(host: object) => void} [options.onHost] - Called as each host
+ *   resolves online, with the fully-assembled host record.
+ * @returns {Promise<{hosts: object[], subnet: string, range: object, capped: boolean, gatewayIp: string, durationSec: string}>}
  */
-async function scanHost(ip, gatewayIp = null) {
-  scanned++;
-  process.stdout.write(`\rScanning ${scanned}/${totalHosts} : ${ip}          `);
+async function scan(options = {}) {
+  const { hostConcurrency = HOST_CONCURRENCY, onProgress, onHost } = options;
 
-  const ping = await pingHost(ip);
-  if (!ping.alive) return;
+  const { subnet, ips: rangeIps, range, capped } = getHostRange();
+  const ips = options.ips || rangeIps;
 
-  const [hostname, openPorts, mac] = await Promise.all([
-    getHostname(ip),
-    scanPorts(ip),
-    getMac(ip),
-  ]);
+  // Best-effort real default gateway, falling back to the subnet's first
+  // usable host if the OS routing table can't be read/parsed.
+  const gatewayIp = await getGatewayIp(range);
 
-  const vendor = mac ? await getVendor(mac) : "Unknown Vendor";
-  const isGateway = gatewayIp === ip;
-  const { type } = classifyDevice({ hostname, vendor, openPorts, isGateway });
+  const onlineHosts = [];
+  let scanned = 0;
+  const totalHosts = ips.length;
 
-  const host = {
-    ip,
-    hostname,
-    mac: mac || "Unknown",
-    vendor,
-    deviceType: type,
-    latency: `${ping.latency} ms`,
-    openPorts,
-    scannedAt: new Date().toISOString(),
-  };
+  async function scanHost(ip) {
+    scanned++;
+    if (onProgress) onProgress(ip, scanned, totalHosts);
 
-  onlineHosts.push(host);
+    const ping = await pingHost(ip);
+    if (!ping.alive) return;
 
-  console.log(`
+    const [hostname, openPorts, mac] = await Promise.all([
+      getHostname(ip),
+      scanPorts(ip),
+      getMac(ip),
+    ]);
 
-========================================
-HOST ONLINE
-========================================
-IP        : ${host.ip}
-Hostname  : ${host.hostname}
-MAC       : ${host.mac}
-Vendor    : ${host.vendor}
-Type      : ${host.deviceType}
-Latency   : ${host.latency}
-Ports     : ${
-    openPorts.length ? openPorts.map((p) => `${p.port} (${p.service})`).join(", ") : "None"
+    const vendor = mac ? await getVendor(mac) : "Unknown Vendor";
+    const isGateway = gatewayIp === ip;
+    const { type } = classifyDevice({ hostname, vendor, openPorts, isGateway });
+
+    const host = {
+      ip,
+      hostname,
+      mac: mac || "Unknown",
+      vendor,
+      deviceType: type,
+      latency: `${ping.latency} ms`,
+      openPorts,
+      scannedAt: new Date().toISOString(),
+    };
+
+    onlineHosts.push(host);
+    if (onHost) onHost(host);
   }
-========================================`);
-}
-
-/**
- * Scan a list of host IPs with bounded concurrency.
- * @param {string[]} ips
- * @param {string|null} gatewayIp
- */
-async function scanNetwork(ips, gatewayIp = null) {
-  totalHosts = ips.length;
-  console.log(`\nScanning ${ips.length} host(s)\n`);
-
-  const tasks = ips.map((ip) => () => scanHost(ip, gatewayIp));
-  await runWithConcurrency(tasks, HOST_CONCURRENCY);
-}
-
-/**
- * Main entry point.
- */
-async function start() {
-  console.clear();
-  console.log("==================================");
-  console.log("      Node Network Scanner");
-  console.log("==================================");
-
-  const { subnet, ips, range, capped } = getHostRange();
-
-  console.log(`\nSubnet detected: ${range.network}/${range.cidr}`);
-  if (capped) {
-    console.log(
-      `Note: subnet has ${range.totalHosts} usable hosts; capping scan to the first ${ips.length} for safety.`
-    );
-  }
-
-  // Best-effort guess at the gateway: conventionally the first usable host.
-  const gatewayIp = range.firstHost;
 
   const startTime = Date.now();
-  await scanNetwork(ips, gatewayIp);
-  const endTime = Date.now();
-  const durationSec = ((endTime - startTime) / 1000).toFixed(2);
+  const tasks = ips.map((ip) => () => scanHost(ip));
+  await runWithConcurrency(tasks, hostConcurrency);
+  const durationSec = ((Date.now() - startTime) / 1000).toFixed(2);
 
-  const paths = report.saveAll(onlineHosts, { subnet, durationSec });
-
-  console.log("\n\n==================================");
-  console.log("SCAN COMPLETE");
-  console.log("==================================");
-  console.log(`Subnet        : ${range.network}/${range.cidr}`);
-  console.log(`Hosts Online  : ${onlineHosts.length}`);
-  console.log(`Hosts Scanned : ${ips.length}`);
-  console.log(`Time Taken    : ${durationSec} sec`);
-  console.log(`\nReports saved:`);
-  console.log(`  JSON : ${paths.json}`);
-  console.log(`  CSV  : ${paths.csv}`);
-  console.log(`  HTML : ${paths.html}`);
-
-  console.table(
-    onlineHosts.map((h) => ({
-      ip: h.ip,
-      hostname: h.hostname,
-      vendor: h.vendor,
-      type: h.deviceType,
-      latency: h.latency,
-      ports: h.openPorts.length,
-    }))
-  );
+  return { hosts: onlineHosts, subnet, range, capped, gatewayIp, durationSec };
 }
 
 module.exports = {
-  start,
+  scan,
 };
