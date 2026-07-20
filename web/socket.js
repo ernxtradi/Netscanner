@@ -9,6 +9,8 @@
 const { scan } = require("../src/scanner");
 const { startMonitoring } = require("../src/monitor");
 const { buildTopology } = require("../src/topology");
+const capture = require("../src/capture");
+const { runSpeedTest } = require("../src/speedtest");
 const report = require("../src/report");
 
 let latestResult = null; // last scan:complete payload
@@ -16,6 +18,8 @@ let scanInFlight = false;
 let scanCounter = 0;
 let monitorHandle = null;
 let monitorIntervalMs = 60000;
+let captureHandle = null;
+let speedTestInFlight = false;
 
 function buildCompletePayload(result, { source, saveReports }) {
   const reportPaths = saveReports ? report.saveAll(result.hosts, { subnet: result.subnet, durationSec: result.durationSec }) : null;
@@ -66,6 +70,7 @@ function registerSocketHandlers(io) {
   io.on("connection", (socket) => {
     if (latestResult) socket.emit("scan:complete", latestResult);
     socket.emit("monitor:status", { running: Boolean(monitorHandle), intervalMs: monitorIntervalMs });
+    socket.emit("capture:status", { running: Boolean(captureHandle), ...capture.checkAvailable() });
 
     socket.on("scan:start", async () => {
       if (scanInFlight || (monitorHandle && monitorHandle.isRunning())) {
@@ -105,6 +110,44 @@ function registerSocketHandlers(io) {
       monitorHandle.stop();
       monitorHandle = null;
       io.emit("monitor:status", { running: false, intervalMs: monitorIntervalMs });
+    });
+
+    socket.on("capture:start", () => {
+      if (captureHandle) return;
+      try {
+        captureHandle = capture.startCapture({
+          onStats: (snapshot) => io.emit("capture:stats", snapshot),
+        });
+        io.emit("capture:status", { running: true, ...capture.checkAvailable() });
+      } catch (err) {
+        captureHandle = null;
+        socket.emit("capture:error", { message: err.message });
+        io.emit("capture:status", { running: false, ...capture.checkAvailable() });
+      }
+    });
+
+    socket.on("capture:stop", () => {
+      if (!captureHandle) return;
+      captureHandle.stop();
+      captureHandle = null;
+      io.emit("capture:status", { running: false, ...capture.checkAvailable() });
+    });
+
+    socket.on("speedtest:run", async () => {
+      if (speedTestInFlight) return;
+      speedTestInFlight = true;
+      io.emit("speedtest:status", { running: true });
+      try {
+        const result = await runSpeedTest({
+          onPhase: (phase) => io.emit("speedtest:phase", { phase }),
+        });
+        io.emit("speedtest:result", result);
+      } catch (err) {
+        io.emit("speedtest:error", { message: err.message });
+      } finally {
+        speedTestInFlight = false;
+        io.emit("speedtest:status", { running: false });
+      }
     });
   });
 }

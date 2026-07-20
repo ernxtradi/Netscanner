@@ -53,7 +53,7 @@ function buildTopology(hosts, gatewayIp, localIp = null) {
       shape: host.ip === localIp ? "star" : "dot",
       isSelf: host.ip === localIp,
       title: `${host.ip}\n${host.vendor}\n${host.deviceType}\nPorts: ${
-        (host.openPorts || []).map((p) => p.port).join(", ") || "none"
+        (host.openPorts || []).map((p) => `${p.port}/${p.protocol || "tcp"}`).join(", ") || "none"
       }`,
     });
 

@@ -1,7 +1,7 @@
 const { pingHost } = require("./ping");
 const { getHostRange } = require("./subnet");
 const { getHostname } = require("./dns");
-const { scanPorts } = require("./ports");
+const { scanHostPorts } = require("./ports");
 const { getMac } = require("./arp");
 const { getVendor } = require("./vendor");
 const { getGatewayIp } = require("./gateway");
@@ -57,7 +57,7 @@ async function scan(options = {}) {
 
     const [hostname, openPorts, mac] = await Promise.all([
       getHostname(ip),
-      scanPorts(ip),
+      scanHostPorts(ip),
       getMac(ip),
     ]);
 

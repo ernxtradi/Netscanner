@@ -76,6 +76,7 @@ button:hover { opacity: 0.9; }
 .table-panel { grid-column: 1; grid-row: 1; }
 .graph-panel { grid-column: 2; grid-row: 1 / span 2; }
 .log-panel { grid-column: 1; grid-row: 2; }
+.traffic-panel { grid-column: 1 / -1; grid-row: 3; }
 
 .table-scroll { overflow-x: auto; max-height: 45vh; overflow-y: auto; }
 
@@ -94,8 +95,31 @@ th { color: var(--muted); position: sticky; top: 0; background: var(--panel); }
 .log-offline { color: #f87171; }
 .log-changed { color: #facc15; }
 
+.speedtest-bar {
+  padding: 0.4rem 1.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.speedtest-bar:empty { display: none; }
+
+.traffic-note {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.capture-message {
+  font-size: 0.82rem;
+  color: #f87171;
+  margin-bottom: 0.5rem;
+}
+.capture-message:empty { display: none; }
+
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .graph-panel { grid-column: 1; grid-row: 3; }
   .log-panel { grid-row: 2; }
+  .traffic-panel { grid-row: 4; }
 }

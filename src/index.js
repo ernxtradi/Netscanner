@@ -17,7 +17,7 @@ Type      : ${host.deviceType}
 Latency   : ${host.latency}
 Ports     : ${
     host.openPorts.length
-      ? host.openPorts.map((p) => `${p.port} (${p.service})`).join(", ")
+      ? host.openPorts.map((p) => `${p.port}/${p.protocol || "tcp"} (${p.service})`).join(", ")
       : "None"
   }
 ========================================`);

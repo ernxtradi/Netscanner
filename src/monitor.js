@@ -24,8 +24,11 @@ function diffHostProps(prev, curr) {
     }
   }
 
-  const prevPorts = new Set((prev.openPorts || []).map((p) => p.port));
-  const currPorts = new Set((curr.openPorts || []).map((p) => p.port));
+  // Keyed by "protocol/port" (not port alone) so e.g. 53/udp and 53/tcp
+  // are tracked as distinct ports and don't collide in the diff.
+  const portKey = (p) => `${p.port}/${p.protocol || "tcp"}`;
+  const prevPorts = new Set((prev.openPorts || []).map(portKey));
+  const currPorts = new Set((curr.openPorts || []).map(portKey));
   const added = [...currPorts].filter((p) => !prevPorts.has(p));
   const removed = [...prevPorts].filter((p) => !currPorts.has(p));
 

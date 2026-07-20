@@ -16,6 +16,7 @@ const GROUP_COLORS = {
 const scanBtn = document.getElementById("scan-btn");
 const monitorToggle = document.getElementById("monitor-toggle");
 const monitorInterval = document.getElementById("monitor-interval");
+const captureToggle = document.getElementById("capture-toggle");
 const statusPill = document.getElementById("status-pill");
 const subnetInfo = document.getElementById("subnet-info");
 const hostCountEl = document.getElementById("host-count");
@@ -23,6 +24,11 @@ const tableBody = document.querySelector("#host-table tbody");
 const reportLinks = document.getElementById("report-links");
 const changeLog = document.getElementById("change-log");
 const topologyEl = document.getElementById("topology");
+const trafficSummary = document.getElementById("traffic-summary");
+const trafficBody = document.querySelector("#traffic-table tbody");
+const captureMessage = document.getElementById("capture-message");
+const speedtestBtn = document.getElementById("speedtest-btn");
+const speedtestBar = document.getElementById("speedtest-bar");
 
 let network = null;
 let nodesDataSet = new vis.DataSet([]);
@@ -44,7 +50,7 @@ function renderTable(hostsMap) {
       <td>${h.vendor}</td>
       <td>${h.deviceType}</td>
       <td>${h.latency}</td>
-      <td>${(h.openPorts || []).map((p) => `${p.port}(${p.service})`).join(", ") || "—"}</td>
+      <td>${(h.openPorts || []).map((p) => `${p.port}/${p.protocol || "tcp"}(${p.service})`).join(", ") || "—"}</td>
     `;
     tableBody.appendChild(tr);
   }
@@ -72,6 +78,38 @@ function renderTopology(topology) {
         edges: { color: "#475569", smooth: false },
       }
     );
+  }
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderTraffic(snapshot) {
+  const { totals, hosts } = snapshot;
+  trafficSummary.textContent = `(${totals.packets} pkts, ${formatBytes(totals.bytes)} — ` +
+    `tcp ${totals.tcp} · udp ${totals.udp} · icmp ${totals.icmp} · arp ${totals.arp} · other ${totals.other})`;
+
+  trafficBody.innerHTML = "";
+  for (const h of hosts) {
+    const tr = document.createElement("tr");
+    const ports = (h.ports || []).map((p) => p.key).join(", ") || "—";
+    tr.innerHTML = `
+      <td>${h.ip}${h.isLocal ? " (this host)" : ""}</td>
+      <td>${formatBytes(h.bytesSent)} / ${h.packetsSent} pkt</td>
+      <td>${formatBytes(h.bytesReceived)} / ${h.packetsReceived} pkt</td>
+      <td>${(h.mbpsSent || 0).toFixed(2)} Mbps</td>
+      <td>${(h.mbpsReceived || 0).toFixed(2)} Mbps</td>
+      <td>${h.tcp || 0}</td>
+      <td>${h.udp || 0}</td>
+      <td>${h.icmp || 0}</td>
+      <td>${h.other || 0}</td>
+      <td>${ports}</td>
+      <td>${new Date(h.lastSeen).toLocaleTimeString()}</td>
+    `;
+    trafficBody.appendChild(tr);
   }
 }
 
@@ -117,6 +155,19 @@ monitorToggle.addEventListener("change", () => {
   }
 });
 
+captureToggle.addEventListener("change", () => {
+  captureMessage.textContent = "";
+  if (captureToggle.checked) {
+    socket.emit("capture:start");
+  } else {
+    socket.emit("capture:stop");
+  }
+});
+
+speedtestBtn.addEventListener("click", () => {
+  socket.emit("speedtest:run");
+});
+
 socket.on("scan:progress", ({ ip, scanned, total }) => {
   setStatus(`scanning ${scanned}/${total} (${ip})`);
 });
@@ -146,6 +197,39 @@ socket.on("monitor:status", ({ running, intervalMs }) => {
 });
 
 socket.on("monitor:change", logChange);
+
+socket.on("capture:status", ({ running, available, reason }) => {
+  captureToggle.checked = running;
+  captureToggle.disabled = !available && !running;
+  captureMessage.textContent = !available ? reason || "Packet capture is unavailable." : "";
+});
+
+socket.on("capture:stats", renderTraffic);
+
+socket.on("capture:error", ({ message }) => {
+  captureToggle.checked = false;
+  captureMessage.textContent = message;
+});
+
+socket.on("speedtest:status", ({ running }) => {
+  speedtestBtn.disabled = running;
+  speedtestBtn.textContent = running ? "Testing…" : "Speed Test";
+});
+
+socket.on("speedtest:phase", ({ phase }) => {
+  speedtestBar.textContent = `Speed test: ${phase}…`;
+});
+
+socket.on("speedtest:result", ({ pingMs, downloadMbps, uploadMbps, testedAt }) => {
+  const ping = pingMs != null ? `${pingMs} ms` : "N/A (ICMP blocked?)";
+  speedtestBar.textContent =
+    `Internet speed — ping: ${ping} · download: ${downloadMbps} Mbps · upload: ${uploadMbps} Mbps ` +
+    `(${new Date(testedAt).toLocaleTimeString()})`;
+});
+
+socket.on("speedtest:error", ({ message }) => {
+  speedtestBar.textContent = `Speed test failed: ${message}`;
+});
 
 fetch("/api/interfaces")
   .then((r) => r.json())

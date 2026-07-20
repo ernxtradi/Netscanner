@@ -15,6 +15,7 @@
  */
 
 const net = require("net");
+const dgram = require("dgram");
 const { runWithConcurrency } = require("./utils");
 
 // A small, common-port -> service-name table.
@@ -33,6 +34,16 @@ const COMMON_SERVICES = {
   9200: "elasticsearch", 27017: "mongodb",
 };
 
+// UDP port numbers frequently mean something different than their TCP
+// counterpart (e.g. 161/tcp is rarely used, but 161/udp is SNMP). Checked
+// first for UDP lookups, falling back to COMMON_SERVICES.
+const UDP_SERVICES = {
+  53: "dns", 67: "dhcp-server", 68: "dhcp-client", 69: "tftp",
+  111: "rpcbind", 123: "ntp", 137: "netbios-ns", 138: "netbios-dgm",
+  161: "snmp", 162: "snmptrap", 500: "isakmp", 514: "syslog",
+  520: "rip", 1900: "ssdp", 5353: "mdns",
+};
+
 // Default ports checked when scanPorts() is called with no port list —
 // a fast, "top 20" style sweep suitable for scanning an entire /24.
 const DEFAULT_PORTS = [
@@ -40,12 +51,20 @@ const DEFAULT_PORTS = [
   443, 445, 3306, 3389, 5432, 5900, 8080, 8443, 9200, 27017,
 ];
 
+// Default UDP ports checked when scanUdpPorts() is called with no port
+// list — common LAN/service discovery and infrastructure ports.
+const DEFAULT_UDP_PORTS = [
+  53, 67, 68, 69, 111, 123, 137, 138, 161, 162, 500, 514, 520, 1900, 5353,
+];
+
 /**
  * Look up a friendly service name for a port. Falls back to "unknown".
  * @param {number} port
+ * @param {"tcp"|"udp"} [protocol="tcp"]
  * @returns {string}
  */
-function serviceName(port) {
+function serviceName(port, protocol = "tcp") {
+  if (protocol === "udp") return UDP_SERVICES[port] || COMMON_SERVICES[port] || "unknown";
   return COMMON_SERVICES[port] || "unknown";
 }
 
@@ -104,14 +123,122 @@ async function scanPorts(ip, ports = DEFAULT_PORTS, options = {}) {
 
   const tasks = ports.map((port) => async () => ({
     port,
-    open: await scanPort(ip, port, timeout),
-    service: serviceName(port),
+    protocol: "tcp",
+    state: (await scanPort(ip, port, timeout)) ? "open" : "closed",
+    service: serviceName(port, "tcp"),
   }));
 
   const results = await runWithConcurrency(tasks, concurrency);
   return results
-    .filter((r) => r.open)
+    .filter((r) => r.state === "open")
     .sort((a, b) => a.port - b.port);
+}
+
+/**
+ * Probe a single UDP port on a host.
+ *
+ * UDP is connectionless, so "open" can't be detected the way TCP's
+ * SYN/ACK can — this uses the same technique as nmap's UDP scan:
+ *   - send an empty datagram
+ *   - a reply datagram means the port is definitely open
+ *   - on Linux/macOS, a connected UDP socket surfaces an ICMP
+ *     "port unreachable" as an ECONNREFUSED error event, meaning closed
+ *   - no reply and no error before the timeout is ambiguous (the
+ *     datagram or an ICMP reply may have been silently dropped by a
+ *     firewall) — reported as "open|filtered", matching standard
+ *     UDP-scan terminology
+ * @param {string} ip
+ * @param {number} port
+ * @param {number} [timeout=1000]
+ * @returns {Promise<"open"|"closed"|"open|filtered">}
+ */
+function scanUdpPort(ip, port, timeout = 1000) {
+  if (!ip || typeof ip !== "string") {
+    return Promise.reject(new Error("scanUdpPort: 'ip' must be a non-empty string"));
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return Promise.reject(new Error(`scanUdpPort: invalid port '${port}'`));
+  }
+
+  return new Promise((resolve) => {
+    const socket = dgram.createSocket("udp4");
+    let settled = false;
+    let timer = null;
+
+    const finish = (state) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      socket.removeAllListeners();
+      try {
+        socket.close();
+      } catch {
+        // already closed
+      }
+      resolve(state);
+    };
+
+    socket.once("error", (err) => finish(err.code === "ECONNREFUSED" ? "closed" : "open|filtered"));
+    socket.once("message", () => finish("open"));
+
+    socket.connect(port, ip, () => {
+      timer = setTimeout(() => finish("open|filtered"), timeout);
+      socket.send(Buffer.from([0]));
+    });
+  });
+}
+
+/**
+ * Scan a list of UDP ports on a host. If `ports` is omitted, scans
+ * DEFAULT_UDP_PORTS. Matches scanPorts()'s shape/behavior but excludes
+ * only definitively "closed" ports — "open|filtered" results are kept,
+ * since silence is expected/common for UDP even on an open port.
+ * @param {string} ip
+ * @param {number[]} [ports=DEFAULT_UDP_PORTS]
+ * @param {object} [options]
+ * @param {number} [options.timeout=1000] - Per-port timeout in ms.
+ * @param {number} [options.concurrency=50] - Max simultaneous probes.
+ * @returns {Promise<Array<{port: number, protocol: "udp", state: string, service: string}>>}
+ */
+async function scanUdpPorts(ip, ports = DEFAULT_UDP_PORTS, options = {}) {
+  const { timeout = 1000, concurrency = 50 } = options;
+
+  if (!Array.isArray(ports) || ports.length === 0) {
+    throw new Error("scanUdpPorts: 'ports' must be a non-empty array");
+  }
+
+  const tasks = ports.map((port) => async () => ({
+    port,
+    protocol: "udp",
+    state: await scanUdpPort(ip, port, timeout),
+    service: serviceName(port, "udp"),
+  }));
+
+  const results = await runWithConcurrency(tasks, concurrency);
+  return results
+    .filter((r) => r.state !== "closed")
+    .sort((a, b) => a.port - b.port);
+}
+
+/**
+ * Scan both the default TCP and UDP port lists on a host and merge the
+ * results into one list, each entry tagged with its protocol — this is
+ * what scanner.js uses to populate a host's `openPorts`.
+ * @param {string} ip
+ * @param {object} [options]
+ * @param {number[]} [options.tcpPorts=DEFAULT_PORTS]
+ * @param {number[]} [options.udpPorts=DEFAULT_UDP_PORTS]
+ * @param {number} [options.timeout]
+ * @param {number} [options.concurrency]
+ * @returns {Promise<Array<object>>}
+ */
+async function scanHostPorts(ip, options = {}) {
+  const { tcpPorts = DEFAULT_PORTS, udpPorts = DEFAULT_UDP_PORTS, ...rest } = options;
+  const [tcp, udp] = await Promise.all([
+    scanPorts(ip, tcpPorts, rest),
+    scanUdpPorts(ip, udpPorts, rest),
+  ]);
+  return [...tcp, ...udp].sort((a, b) => a.port - b.port);
 }
 
 /**
@@ -135,52 +262,70 @@ module.exports = {
   scanPort,
   scanPorts,
   scanPortRange,
+  scanUdpPort,
+  scanUdpPorts,
+  scanHostPorts,
   serviceName,
   COMMON_SERVICES,
+  UDP_SERVICES,
   DEFAULT_PORTS,
+  DEFAULT_UDP_PORTS,
 };
 
 // ---------------------------------------------------------------------------
 // CLI usage:
-//   node ports.js <ip> <port|start-end> [timeout] [concurrency]
+//   node ports.js <ip> <port|start-end> [timeout] [concurrency] [udp]
 // Examples:
 //   node ports.js 192.168.0.1 22
 //   node ports.js 192.168.0.1 1-1024
 //   node ports.js 192.168.0.1 1-65535 300 100
+//   node ports.js 192.168.0.1 53 1000 50 udp
 // ---------------------------------------------------------------------------
 if (require.main === module) {
   (async () => {
-    const [, , ip, portArg, timeoutArg, concurrencyArg] = process.argv;
+    const [, , ip, portArg, timeoutArg, concurrencyArg, protoArg] = process.argv;
 
     if (!ip) {
-      console.error("Usage: node ports.js <ip> [port|start-end] [timeout] [concurrency]");
+      console.error("Usage: node ports.js <ip> [port|start-end] [timeout] [concurrency] [udp]");
       process.exit(1);
     }
 
-    const timeout = timeoutArg ? parseInt(timeoutArg, 10) : 500;
+    const udp = protoArg === "udp";
+    const timeout = timeoutArg ? parseInt(timeoutArg, 10) : udp ? 1000 : 500;
     const concurrency = concurrencyArg ? parseInt(concurrencyArg, 10) : 50;
 
     try {
       let results;
       if (!portArg) {
-        console.log(`Scanning ${ip} default ports (timeout=${timeout}ms)...`);
-        results = await scanPorts(ip, DEFAULT_PORTS, { timeout, concurrency });
+        console.log(`Scanning ${ip} default ${udp ? "UDP" : "TCP"} ports (timeout=${timeout}ms)...`);
+        results = udp
+          ? await scanUdpPorts(ip, DEFAULT_UDP_PORTS, { timeout, concurrency })
+          : await scanPorts(ip, DEFAULT_PORTS, { timeout, concurrency });
       } else if (portArg.includes("-")) {
         const [start, end] = portArg.split("-").map(Number);
-        console.log(`Scanning ${ip} ports ${start}-${end} (timeout=${timeout}ms, concurrency=${concurrency})...`);
-        results = await scanPortRange(ip, start, end, { timeout, concurrency });
+        console.log(`Scanning ${ip} ${udp ? "UDP" : "TCP"} ports ${start}-${end} (timeout=${timeout}ms, concurrency=${concurrency})...`);
+        const ports = [];
+        for (let p = start; p <= end; p++) ports.push(p);
+        results = udp
+          ? await scanUdpPorts(ip, ports, { timeout, concurrency })
+          : await scanPortRange(ip, start, end, { timeout, concurrency });
       } else {
         const port = Number(portArg);
-        console.log(`Scanning ${ip} port ${port} (timeout=${timeout}ms)...`);
-        const open = await scanPort(ip, port, timeout);
-        results = open ? [{ port, open: true, service: serviceName(port) }] : [];
+        console.log(`Scanning ${ip} ${udp ? "UDP" : "TCP"} port ${port} (timeout=${timeout}ms)...`);
+        if (udp) {
+          const state = await scanUdpPort(ip, port, timeout);
+          results = state === "closed" ? [] : [{ port, protocol: "udp", state, service: serviceName(port, "udp") }];
+        } else {
+          const open = await scanPort(ip, port, timeout);
+          results = open ? [{ port, protocol: "tcp", state: "open", service: serviceName(port, "tcp") }] : [];
+        }
       }
 
       if (results.length === 0) {
         console.log("No open ports found.");
       } else {
         console.log(`\nOpen ports on ${ip}:`);
-        results.forEach((r) => console.log(`  ${r.port}/tcp  open  ${r.service}`));
+        results.forEach((r) => console.log(`  ${r.port}/${r.protocol}  ${r.state}  ${r.service}`));
       }
       console.log(`\n${results.length} open port(s) found.`);
     } catch (err) {

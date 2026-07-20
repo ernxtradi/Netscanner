@@ -44,7 +44,7 @@ function saveCSV(hosts, dir = "reports") {
     headers
       .map((key) => {
         if (key === "openPorts") {
-          return csvEscape((h.openPorts || []).map((p) => `${p.port}(${p.service})`).join("; "));
+          return csvEscape((h.openPorts || []).map((p) => `${p.port}/${p.protocol || "tcp"}(${p.service})`).join("; "));
         }
         return csvEscape(h[key]);
       })
@@ -79,7 +79,7 @@ function saveHTML(hosts, meta = {}, dir = "reports") {
         <td>${escapeHtml(h.vendor)}</td>
         <td>${escapeHtml(h.deviceType)}</td>
         <td>${escapeHtml(h.latency)}</td>
-        <td>${escapeHtml((h.openPorts || []).map((p) => `${p.port} (${p.service})`).join(", ") || "None")}</td>
+        <td>${escapeHtml((h.openPorts || []).map((p) => `${p.port}/${p.protocol || "tcp"} (${p.service})`).join(", ") || "None")}</td>
       </tr>`
     )
     .join("");

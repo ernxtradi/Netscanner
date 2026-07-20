@@ -18,9 +18,15 @@
         <input type="number" id="monitor-interval" value="60" min="5" step="5" title="interval (seconds)">
         s
       </label>
+      <label class="monitor-toggle" id="capture-toggle-label">
+        <input type="checkbox" id="capture-toggle">
+        Live Traffic
+      </label>
+      <button id="speedtest-btn">Speed Test</button>
       <span class="status-pill" id="status-pill">idle</span>
     </div>
   </header>
+  <div class="speedtest-bar" id="speedtest-bar"></div>
 
   <main class="layout">
     <section class="panel table-panel">
@@ -47,6 +53,28 @@
     <section class="panel log-panel">
       <h2>Change Log</h2>
       <ul id="change-log"></ul>
+    </section>
+
+    <section class="panel traffic-panel">
+      <h2>Live Traffic <span id="traffic-summary"></span></h2>
+      <p class="traffic-note">
+        Packet capture only sees traffic to/from <em>this</em> machine, plus broadcast/multicast
+        (ARP, mDNS, SSDP, DHCP) — not traffic between two other devices, unless run on the
+        gateway or a mirrored switch port.
+      </p>
+      <div id="capture-message" class="capture-message"></div>
+      <div class="table-scroll">
+        <table id="traffic-table">
+          <thead>
+            <tr>
+              <th>IP</th><th>Sent</th><th>Received</th><th>Speed ↑</th><th>Speed ↓</th>
+              <th>TCP</th><th>UDP</th><th>ICMP</th><th>Other</th>
+              <th>Ports seen</th><th>Last seen</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </section>
   </main>
 
