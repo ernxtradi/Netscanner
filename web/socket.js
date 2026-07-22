@@ -117,6 +117,15 @@ function registerSocketHandlers(io) {
       try {
         captureHandle = capture.startCapture({
           onStats: (snapshot) => io.emit("capture:stats", snapshot),
+          // Fires for both explicit failures (missing module, no device,
+          // permission denied) and unexpected crashes once capture.js's
+          // bounded auto-restart is exhausted. Either way the session is
+          // over — never takes the dashboard process down with it.
+          onError: (err) => {
+            captureHandle = null;
+            io.emit("capture:error", { message: err.message });
+            io.emit("capture:status", { running: false, ...capture.checkAvailable() });
+          },
         });
         io.emit("capture:status", { running: true, ...capture.checkAvailable() });
       } catch (err) {
